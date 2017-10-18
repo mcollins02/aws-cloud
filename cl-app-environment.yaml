@@ -1,0 +1,249 @@
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: "App Environment Configuration"
+        Parameters:
+          - ENVIRONMENT
+          - MinSize
+          - MaxSize
+          - DesiredCapacity
+Parameters:
+  DatabaseName:
+    Type: String
+    Default: wordpress
+    MinLength: 1
+    MaxLength: 64
+    AllowedPattern: "[a-zA-Z][a-zA-Z0-9]*" # start with a letter, only alphanumeric characters - new for this lesson
+  DatabaseUser:
+    Type: String
+    MinLength: 1
+    MaxLength: 16
+    Default: wordpress
+    AllowedPattern: "[a-zA-Z][a-zA-Z0-9]*" # start with a letter, only alphanumeric characters - new for this lesson
+  DatabasePassword:
+    Type: String
+    MinLength: 8
+    MaxLength: 41
+    Default: w0rdpr355
+    NoEcho: true
+    AllowedPattern: "[a-zA-Z0-9]*" # Must only contain alphanumeric characters - new for this lesson
+  ENVIRONMENT:
+    Type: String
+    Description: Type of environment to provision
+    Default: DEV
+    AllowedValues:
+      - DEV
+      - TEST
+      - PROD
+      - PRESALES
+  MinSize:
+    Type: String
+    Description: Minimum number of app servers
+    Default: "1"
+  MaxSize:
+    Type: String
+    Description: Maximum number of app servers (Desired x 2)
+    Default: "2"
+  DesiredCapacity:
+    Type: String
+    Description: Nominal Size of APP Env
+    Default: "1"
+
+Mappings:
+  RegionMap:
+    us-east-1:
+      "AMALINUX" : "ami-c481fad3" # AMALINUX SEP 2016
+    us-east-2:
+      "AMALINUX" : "ami-71ca9114" # AMALINUX SEP 2016
+    us-west-1:
+      "AMALINUX" : "ami-de347abe" # AMALINUX SEP 2016
+    us-west-2:
+      "AMALINUX" : "ami-b04e92d0" # AMALINUX SEP 2016
+    ca-central-1:
+      "AMALINUX" : "ami-eb20928f" # AMALINUX SEP 2016 v01
+    eu-west-1:
+      "AMALINUX" : "ami-d41d58a7" # AMALINUX SEP 2016
+    eu-central-1:
+      "AMALINUX" : "ami-0044b96f" # AMALINUX SEP 2016
+    eu-west-2:
+      "AMALINUX" : "ami-bfe0eadb" # AMALINUX SEP 2016 v01
+    ap-southeast-1:
+      "AMALINUX" : "ami-7243e611" # AMALINUX SEP 2016
+    ap-southeast-2:
+      "AMALINUX" : "ami-55d4e436" # AMALINUX SEP 2016
+    ap-northeast-2:
+      "AMALINUX" : "ami-a04297ce" # AMALINUX SEP 2016
+    ap-northeast-1:
+      "AMALINUX" : "ami-1a15c77b" # AMALINUX SEP 2016
+    ap-south-1:
+      "AMALINUX" : "ami-cacbbea5" # AMALINUX SEP 2016
+    sa-east-1:
+      "AMALINUX" : "ami-b777e4db" # AMALINUX SEP 2016
+  InstanceSize:
+    DEV:
+      "EC2" : "t2.micro"
+      "DB" : "db.t2.micro"
+    TEST:
+      "EC2" : "t2.micro"
+      "DB" : "db.t2.small"
+    PROD:
+      "EC2" : "t2.small"
+      "DB" : "db.t2.medium"
+    PRESALES:
+      "EC2" : "t2.micro"
+      "DB" : "db.t2.medium"
+Resources:
+  DB:
+    Type: "AWS::RDS::DBInstance"
+    Properties:
+      AllocatedStorage: 5
+      StorageType: gp2
+      DBInstanceClass: !FindInMap [InstanceSize, !Ref ENVIRONMENT, DB] # Dynamic mapping + Pseudo Parameter
+      DBName: !Ref DatabaseName
+      Engine: postgres
+      MasterUsername: !Ref DatabaseUser
+      MasterUserPassword: !Ref DatabasePassword
+  AutoSubnetCustomResource:
+    Type: "Custom::LambdaAutoSubnet" # or AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !ImportValue sharedinf-autosubnetarn # The ARN of the lambda function - only mandatory property
+      # "Provider Defined Properties" Below..
+      DynamoDBRegion: !Ref "AWS::Region"
+      DynamoDBTable: !ImportValue sharedinf-autosubnetddbtablename
+      VPCCidr: !ImportValue sharedinf-vpciprange
+      Debug: "True"
+  AutoScalingGroup:
+    Type: "AWS::AutoScaling::AutoScalingGroup"
+    Properties:
+      Cooldown: "300"
+      DesiredCapacity: !Ref DesiredCapacity
+      HealthCheckGracePeriod: "300"
+      HealthCheckType: ELB
+      LaunchConfigurationName: !Ref LaunchConfiguration
+      LoadBalancerNames:
+        - !Ref ELB
+      MaxSize: !Ref MaxSize
+      MinSize: !Ref MinSize
+      VPCZoneIdentifier:
+        - !Ref SubnetPrivateA
+        - !Ref SubnetPrivateB
+  EC2Instance:
+    Type: "AWS::EC2::Instance"
+    Properties:
+      ImageId: ami-c481fad3
+      InstanceType: t2.micro
+      KeyName: AdvancedCFN
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: "0"
+          GroupSet:
+            - Ref: "SG"
+          SubnetId:
+            Ref: "SubnetPublicA"
+  LaunchConfiguration:
+    Type: "AWS::AutoScaling::LaunchConfiguration"
+    Properties:
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMALINUX]
+      InstanceType: !FindInMap [InstanceSize, !Ref ENVIRONMENT, EC2]
+      KeyName: AdvancedCFN
+      SecurityGroups:
+        - !Ref SG
+      UserData:
+        "Fn::Base64":
+          !Sub |
+            #!/bin/bash
+            yum update -y
+            yum install httpd -y
+            service httpd start
+            chkconfig httpd on
+            echo "Welcome to My Domain" > /var/www/html/index.html
+  SubnetPublicA: # Public Subnet for App Env in AZ - A
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs ]
+      CidrBlock: !GetAtt AutoSubnetCustomResource.AppPublicCIDRA
+      MapPublicIpOnLaunch: true
+      VpcId: !ImportValue sharedinf-vpcid
+  SubnetPrivateA: # Private Subnet for App Env in AZ - A
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs ]
+      CidrBlock: !GetAtt AutoSubnetCustomResource.AppPrivateCIDRA
+      MapPublicIpOnLaunch: false
+      VpcId: !ImportValue sharedinf-vpcid
+  SubnetPublicB: # Public Subnet for App Env in AZ - B  (not used yet)
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs ]
+      CidrBlock: !GetAtt AutoSubnetCustomResource.AppPublicCIDRB
+      MapPublicIpOnLaunch: true
+      VpcId: !ImportValue sharedinf-vpcid
+  SubnetPrivateB: # Private Subnet for App Env in AZ - B (not used yet)
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs ]
+      CidrBlock: !GetAtt AutoSubnetCustomResource.AppPrivateCIDRB
+      MapPublicIpOnLaunch: false
+      VpcId: !ImportValue sharedinf-vpcid
+  SubnetRouteTableAssociatePublicA: # Associates the subnet with a route table - passed via import
+    DependsOn: SubnetPublicA
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      RouteTableId: !ImportValue sharedinf-publicrt
+      SubnetId: !Ref SubnetPublicA
+  SubnetRouteTableAssociatePublicB: # Associates the subnet with a route table - passed via import
+    DependsOn: SubnetPublicB
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      RouteTableId: !ImportValue sharedinf-publicrt
+      SubnetId: !Ref SubnetPublicB # Associates the subnet with a route table - passed via import
+  SubnetRouteTableAssociatePrivateA: # Associates the subnet with a route table - passed via parameter
+    DependsOn: SubnetPrivateA
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      RouteTableId: !ImportValue sharedinf-privaterta
+      SubnetId: !Ref SubnetPrivateA # Associates the subnet with a route table - passed via parameter
+  SubnetRouteTableAssociatePrivateB: # Associates the subnet with a route table - passed via parameter
+    DependsOn: SubnetPrivateB
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      RouteTableId: !ImportValue sharedinf-privatertb
+      SubnetId: !Ref SubnetPrivateB # Associates the subnet with a route table - passed via parameter
+  ELB:
+    Type: "AWS::ElasticLoadBalancing::LoadBalancer"
+    Properties:
+      CrossZone: true
+      Listeners:
+        -
+          InstancePort: "80"
+          InstanceProtocol: HTTP
+          LoadBalancerPort: "80"
+          Protocol: HTTP
+      Subnets:
+        - !Ref SubnetPublicA
+        - !Ref SubnetPublicB
+      SecurityGroups:
+        - !Ref SG
+  SG:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: !Join ["", ["Stack ", !Ref "AWS::StackId", " - ", !Ref ENVIRONMENT]]
+      VpcId: !ImportValue sharedinf-vpcid
+      SecurityGroupIngress:
+        -
+          CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          ToPort: "80"
+          FromPort: "80"
+        -
+          CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          ToPort: "22"
+          FromPort: "22"
+      SecurityGroupEgress:
+        -
+          CidrIp: 0.0.0.0/0
+          ToPort: "-1"
+          IpProtocol: "-1"
