@@ -10,6 +10,11 @@ Metadata:
           - MaxSize
           - DesiredCapacity
 Parameters:
+
+  SecurityGroup:
+        Description: Select the Security Group to use for the Launch Configuration
+        Type: AWS::EC2::SecurityGroup::Id
+
   DatabaseName:
     Type: String
     Default: wordpress
@@ -95,25 +100,16 @@ Mappings:
       "EC2" : "t2.micro"
       "DB" : "db.t2.medium"
 Resources:
-  DB:
-    Type: "AWS::RDS::DBInstance"
-    Properties:
-      AllocatedStorage: 5
-      StorageType: gp2
-      DBInstanceClass: !FindInMap [InstanceSize, !Ref ENVIRONMENT, DB] # Dynamic mapping + Pseudo Parameter
-      DBName: !Ref DatabaseName
-      Engine: postgres
-      MasterUsername: !Ref DatabaseUser
-      MasterUserPassword: !Ref DatabasePassword
-  AutoSubnetCustomResource:
-    Type: "Custom::LambdaAutoSubnet" # or AWS::CloudFormation::CustomResource
-    Properties:
-      ServiceToken: !ImportValue sharedinf-autosubnetarn # The ARN of the lambda function - only mandatory property
-      # "Provider Defined Properties" Below..
-      DynamoDBRegion: !Ref "AWS::Region"
-      DynamoDBTable: !ImportValue sharedinf-autosubnetddbtablename
-      VPCCidr: !ImportValue sharedinf-vpciprange
-      Debug: "True"
+#  DB:
+#    Type: "AWS::RDS::DBInstance"
+#    Properties:
+#      AllocatedStorage: 5
+#      StorageType: gp2
+#      DBInstanceClass: !FindInMap [InstanceSize, !Ref ENVIRONMENT, DB] # Dynamic mapping + Pseudo Parameter
+#      DBName: !Ref DatabaseName
+#      Engine: postgres
+#      MasterUsername: !Ref DatabaseUser
+#      MasterUserPassword: !Ref DatabasePassword
   AutoScalingGroup:
     Type: "AWS::AutoScaling::AutoScalingGroup"
     Properties:
@@ -123,25 +119,22 @@ Resources:
       HealthCheckType: ELB
       LaunchConfigurationName: !Ref LaunchConfiguration
       LoadBalancerNames:
-        - !Ref ELB
+        - !ImportValue elbandsubnets-elb
       MaxSize: !Ref MaxSize
       MinSize: !Ref MinSize
       VPCZoneIdentifier:
-        - !Ref SubnetPrivateA
-        - !Ref SubnetPrivateB
-  EC2Instance:
-    Type: "AWS::EC2::Instance"
-    Properties:
-      ImageId: ami-c481fad3
-      InstanceType: t2.micro
-      KeyName: AdvancedCFN
-      NetworkInterfaces:
-        - AssociatePublicIpAddress: "true"
-          DeviceIndex: "0"
-          GroupSet:
-            - Ref: "SG"
-          SubnetId:
-            Ref: "SubnetPublicA"
+        - !ImportValue elbandsubnets-subnetprivatea
+        - !ImportValue elbandsubnets-subnetprivateb
+#  EC2Instance:
+#    Type: "AWS::EC2::Instance"
+#    Properties:
+##      InstanceType: t2.micro
+  #    KeyName: AdvancedCFN
+  #    NetworkInterfaces:
+  #      - AssociatePublicIpAddress: "true"
+  ##        GroupSet: !ImportValue securitygroups-sg1
+    #      SubnetId: !ImportValue elbandsubnets-subnetpublica
+
   LaunchConfiguration:
     Type: "AWS::AutoScaling::LaunchConfiguration"
     Properties:
@@ -149,7 +142,7 @@ Resources:
       InstanceType: !FindInMap [InstanceSize, !Ref ENVIRONMENT, EC2]
       KeyName: AdvancedCFN
       SecurityGroups:
-        - !Ref SG
+        - !Ref SecurityGroup
       UserData:
         "Fn::Base64":
           !Sub |
@@ -159,91 +152,3 @@ Resources:
             service httpd start
             chkconfig httpd on
             echo "Welcome to My Domain" > /var/www/html/index.html
-  SubnetPublicA: # Public Subnet for App Env in AZ - A
-    Type: "AWS::EC2::Subnet"
-    Properties:
-      AvailabilityZone: !Select [0, !GetAZs ]
-      CidrBlock: !GetAtt AutoSubnetCustomResource.AppPublicCIDRA
-      MapPublicIpOnLaunch: true
-      VpcId: !ImportValue sharedinf-vpcid
-  SubnetPrivateA: # Private Subnet for App Env in AZ - A
-    Type: "AWS::EC2::Subnet"
-    Properties:
-      AvailabilityZone: !Select [0, !GetAZs ]
-      CidrBlock: !GetAtt AutoSubnetCustomResource.AppPrivateCIDRA
-      MapPublicIpOnLaunch: false
-      VpcId: !ImportValue sharedinf-vpcid
-  SubnetPublicB: # Public Subnet for App Env in AZ - B  (not used yet)
-    Type: "AWS::EC2::Subnet"
-    Properties:
-      AvailabilityZone: !Select [1, !GetAZs ]
-      CidrBlock: !GetAtt AutoSubnetCustomResource.AppPublicCIDRB
-      MapPublicIpOnLaunch: true
-      VpcId: !ImportValue sharedinf-vpcid
-  SubnetPrivateB: # Private Subnet for App Env in AZ - B (not used yet)
-    Type: "AWS::EC2::Subnet"
-    Properties:
-      AvailabilityZone: !Select [1, !GetAZs ]
-      CidrBlock: !GetAtt AutoSubnetCustomResource.AppPrivateCIDRB
-      MapPublicIpOnLaunch: false
-      VpcId: !ImportValue sharedinf-vpcid
-  SubnetRouteTableAssociatePublicA: # Associates the subnet with a route table - passed via import
-    DependsOn: SubnetPublicA
-    Type: "AWS::EC2::SubnetRouteTableAssociation"
-    Properties:
-      RouteTableId: !ImportValue sharedinf-publicrt
-      SubnetId: !Ref SubnetPublicA
-  SubnetRouteTableAssociatePublicB: # Associates the subnet with a route table - passed via import
-    DependsOn: SubnetPublicB
-    Type: "AWS::EC2::SubnetRouteTableAssociation"
-    Properties:
-      RouteTableId: !ImportValue sharedinf-publicrt
-      SubnetId: !Ref SubnetPublicB # Associates the subnet with a route table - passed via import
-  SubnetRouteTableAssociatePrivateA: # Associates the subnet with a route table - passed via parameter
-    DependsOn: SubnetPrivateA
-    Type: "AWS::EC2::SubnetRouteTableAssociation"
-    Properties:
-      RouteTableId: !ImportValue sharedinf-privaterta
-      SubnetId: !Ref SubnetPrivateA # Associates the subnet with a route table - passed via parameter
-  SubnetRouteTableAssociatePrivateB: # Associates the subnet with a route table - passed via parameter
-    DependsOn: SubnetPrivateB
-    Type: "AWS::EC2::SubnetRouteTableAssociation"
-    Properties:
-      RouteTableId: !ImportValue sharedinf-privatertb
-      SubnetId: !Ref SubnetPrivateB # Associates the subnet with a route table - passed via parameter
-  ELB:
-    Type: "AWS::ElasticLoadBalancing::LoadBalancer"
-    Properties:
-      CrossZone: true
-      Listeners:
-        -
-          InstancePort: "80"
-          InstanceProtocol: HTTP
-          LoadBalancerPort: "80"
-          Protocol: HTTP
-      Subnets:
-        - !Ref SubnetPublicA
-        - !Ref SubnetPublicB
-      SecurityGroups:
-        - !Ref SG
-  SG:
-    Type: "AWS::EC2::SecurityGroup"
-    Properties:
-      GroupDescription: !Join ["", ["Stack ", !Ref "AWS::StackId", " - ", !Ref ENVIRONMENT]]
-      VpcId: !ImportValue sharedinf-vpcid
-      SecurityGroupIngress:
-        -
-          CidrIp: 0.0.0.0/0
-          IpProtocol: tcp
-          ToPort: "80"
-          FromPort: "80"
-        -
-          CidrIp: 0.0.0.0/0
-          IpProtocol: tcp
-          ToPort: "22"
-          FromPort: "22"
-      SecurityGroupEgress:
-        -
-          CidrIp: 0.0.0.0/0
-          ToPort: "-1"
-          IpProtocol: "-1"

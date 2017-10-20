@@ -73,7 +73,7 @@ Resources:
     Properties:
       Role: !GetAtt IAMRole.Arn
       Code:
-        S3Bucket: !ImportValue sharedinf-lambdabucketname
+        S3Bucket: !ImportValue lambdabucket-lambdabucketname
         S3Key: autosubnet.zip
       Handler: autosubnet.handler
       Runtime: "python2.7"
@@ -84,9 +84,9 @@ Outputs:
     Description: ARN of AutoSubnet Lambda
     Value: !GetAtt subnetpicker.Arn
     Export:
-      Name: sharedinf-autosubnetarn
+      Name: lambda-autosubnetarn
   autosubnettablename:
     Description: Table Name of AutoSubnet DDB Table
     Value: !Ref AutoSubnetTable
     Export:
-      Name: sharedinf-autosubnetddbtablename
+      Name: lambda-autosubnetddbtablename

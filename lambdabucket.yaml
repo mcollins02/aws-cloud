@@ -1,0 +1,32 @@
+Resources:
+  S3LambdaBucket:
+    DeletionPolicy: Retain
+    Type: "AWS::S3::Bucket"
+    Properties:
+      AccessControl: PublicRead
+      WebsiteConfiguration:
+        ErrorDocument: index.html
+        IndexDocument: index.html
+
+  BucketPolicyLambda:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket: !Ref S3LambdaBucket
+      PolicyDocument:
+        Statement:
+          -
+            Sid: "ABC123"
+            Action:
+              - "s3:GetObject"
+            Effect: Allow
+            Resource: !Join ["", ["arn:aws:s3:::", !Ref S3LambdaBucket, "/*"]]
+            Principal:
+              AWS:
+                - "*"
+
+Outputs:
+  lambdabucket:
+    Description: Shared Infrastructure Lambda Bucket
+    Value: !Ref S3LambdaBucket
+    Export: # added to export
+      Name: lambdabucket-lambdabucketname

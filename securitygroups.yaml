@@ -1,0 +1,29 @@
+Resources:
+  SG1:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: Security Groups
+      VpcId: !ImportValue sharedinf-vpcid
+      SecurityGroupIngress:
+        -
+          CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          ToPort: "80"
+          FromPort: "80"
+        -
+          CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          ToPort: "22"
+          FromPort: "22"
+      SecurityGroupEgress:
+        -
+          CidrIp: 0.0.0.0/0
+          ToPort: "-1"
+          IpProtocol: "-1"
+
+Outputs:
+  securitygroup:
+    Description: Name of securitygroup
+    Value: !Ref SG1
+    Export:
+      Name: securitygroups-sg1

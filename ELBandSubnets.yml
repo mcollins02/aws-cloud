@@ -1,0 +1,112 @@
+Resources:
+
+  AutoSubnetCustomResource:
+    Type: "Custom::LambdaAutoSubnet" # or AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !ImportValue lambda-autosubnetarn # The ARN of the lambda function - only mandatory property
+      # "Provider Defined Properties" Below..
+      DynamoDBRegion: !Ref "AWS::Region"
+      DynamoDBTable: !ImportValue lambda-autosubnetddbtablename
+      VPCCidr: !ImportValue sharedinf-vpciprange
+      Debug: "True"
+
+  SubnetPublicA: # Public Subnet for App Env in AZ - A
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs ]
+      CidrBlock: !GetAtt AutoSubnetCustomResource.AppPublicCIDRA
+      MapPublicIpOnLaunch: true
+      VpcId: !ImportValue sharedinf-vpcid
+
+  SubnetPrivateA: # Private Subnet for App Env in AZ - A
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs ]
+      CidrBlock: !GetAtt AutoSubnetCustomResource.AppPrivateCIDRA
+      MapPublicIpOnLaunch: false
+      VpcId: !ImportValue sharedinf-vpcid
+
+  SubnetPublicB: # Public Subnet for App Env in AZ - B  (not used yet)
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs ]
+      CidrBlock: !GetAtt AutoSubnetCustomResource.AppPublicCIDRB
+      MapPublicIpOnLaunch: true
+      VpcId: !ImportValue sharedinf-vpcid
+
+  SubnetPrivateB: # Private Subnet for App Env in AZ - B (not used yet)
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs ]
+      CidrBlock: !GetAtt AutoSubnetCustomResource.AppPrivateCIDRB
+      MapPublicIpOnLaunch: false
+      VpcId: !ImportValue sharedinf-vpcid
+
+  SubnetRouteTableAssociatePublicA: # Associates the subnet with a route table - passed via import
+    DependsOn: SubnetPublicA
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      RouteTableId: !ImportValue sharedinf-publicrt
+      SubnetId: !Ref SubnetPublicA
+
+  SubnetRouteTableAssociatePublicB: # Associates the subnet with a route table - passed via import
+    DependsOn: SubnetPublicB
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      RouteTableId: !ImportValue sharedinf-publicrt
+      SubnetId: !Ref SubnetPublicB # Associates the subnet with a route table - passed via import
+
+  SubnetRouteTableAssociatePrivateA: # Associates the subnet with a route table - passed via parameter
+    DependsOn: SubnetPrivateA
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      RouteTableId: !ImportValue sharedinf-privaterta
+      SubnetId: !Ref SubnetPrivateA # Associates the subnet with a route table - passed via parameter
+
+  SubnetRouteTableAssociatePrivateB: # Associates the subnet with a route table - passed via parameter
+    DependsOn: SubnetPrivateB
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      RouteTableId: !ImportValue sharedinf-privatertb
+      SubnetId: !Ref SubnetPrivateB # Associates the subnet with a route table - passed via parameter
+
+
+  ELB:
+    Type: "AWS::ElasticLoadBalancing::LoadBalancer"
+    Properties:
+      CrossZone: true
+      Listeners:
+        -
+          InstancePort: "80"
+          InstanceProtocol: HTTP
+          LoadBalancerPort: "80"
+          Protocol: HTTP
+      Subnets:
+        - !Ref SubnetPublicA
+        - !Ref SubnetPublicB
+      SecurityGroups:
+        - !ImportValue securitygroups-sg1
+
+Outputs:
+  subnetprivatea:
+    Description: Private Subnet for App Env in AZ - A
+    Value: !Ref SubnetPrivateA
+    Export:
+      Name: elbandsubnets-subnetprivatea
+
+  subnetprivateb:
+    Description: Private Subnet for App Env in AZ - B
+    Value: !Ref SubnetPrivateB
+    Export:
+      Name: elbandsubnets-subnetprivateb
+
+  elb:
+    Description: Elastic Load Balancer
+    Value: !Ref ELB
+    Export:
+      Name: elbandsubnets-elb
+  publicsubneta:
+    Description: Public Subnet for App Env in AZ - A
+    Value: !Ref SubnetPublicA
+    Export:
+      Name: elbandsubnets-subnetpublica
